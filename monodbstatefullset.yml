@@ -3,32 +3,31 @@ kind: Service
 metadata:
   name: mongo
 spec:
-  ports:
-    - port: 27017
-      targetPort: 27017
   clusterIP: None
   selector:
-    role: mongo
+    app: mongo
+  ports:
+    - port: 27017
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: mongo
 spec:
+  serviceName: mongo
+  replicas: 1
   selector:
     matchLabels:
-      role: mongo
-  serviceName: "mongo"
-  replicas: 3
+      app: mongo
   template:
     metadata:
       labels:
-        role: mongo
+        app: mongo
     spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: mongo
-        image: mongo
+        image: mongo:6
         ports:
           - containerPort: 27017
         env:
@@ -37,13 +36,12 @@ spec:
           - name: MONGO_INITDB_ROOT_PASSWORD
             value: devdb@123
         volumeMounts:
-          - name: mongo-persistent-storage
+          - name: mongo-storage
             mountPath: /data/db
   volumeClaimTemplates:
     - metadata:
-        name: mongo-persistent-storage
+        name: mongo-storage
       spec:
-        #storageClassName: "gp2"
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
@@ -52,39 +50,46 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: springappdeployment
+  name: springapp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: springapp
   template:
     metadata:
-      name: springapppod
       labels:
         app: springapp
     spec:
+      initContainers:
+      - name: wait-for-mongo
+        image: busybox
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z mongo 27017; do
+              echo "Waiting for MongoDB..."
+              sleep 5
+            done
       containers:
-      - name: springappcontainer
+      - name: springapp
         image: dockerhandson/spring-boot-mongo
         ports:
-        - containerPort: 8080
+          - containerPort: 8080
         env:
-        - name: MONGO_DB_USERNAME
-          value: devdb
-        - name: MONGO_DB_PASSWORD
-          value: devdb@123
-        - name: MONGO_DB_HOSTNAME
-          value: mongo
+          - name: SPRING_DATA_MONGODB_URI
+            value: mongodb://devdb:devdb%40123@mongo:27017/admin
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: springapp
 spec:
+  type: NodePort
   selector:
     app: springapp
   ports:
-  - port: 80
-    targetPort: 8080
-  type: LoadBalancer
+    - port: 80
+      targetPort: 8080
+      nodePort: 30007
